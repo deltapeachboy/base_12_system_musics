@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター (楽譜・リズム完全同期版)</title>
+    <title>12進法数理音楽ジェネレーター (音響エラー修正版)</title>
     <!-- MIDIファイル生成用のライブラリ -->
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
     <!-- 楽譜描画用のライブラリ (abcjs) -->
@@ -110,7 +110,7 @@
 <body>
 
     <h1>12進法数理音楽ジェネレーター</h1>
-    <p class="subtitle">数理定数・任意の数値から、128音の美しい楽譜と響きを自動構築</p>
+    <p class="subtitle">音階とリズム設計により、不規則な数列を128音の美しい楽譜と響きにマッピング</p>
 
     <div class="controls">
         <div class="param">
@@ -305,13 +305,12 @@
             }
         }
 
-        // 決定論的アルゴリズム（未入力クラッシュ対策のセーフガード付き）
+        // 擬似乱数アルゴリズム（クラッシュ対策のセーフガード付き）
         function getDeterministicDuration(index, mode) {
             if (mode === "fixed") {
                 return NOTE_LENGTHS[2]; // 4分音符
             }
 
-            // シーケンスが空の時のための安全対策
             let startCharVal = (currentSequence && currentSequence.length > 0) ? (charToVal[currentSequence[0]] || 0) : 0;
             let secondCharVal = (currentSequence && currentSequence.length > 1) ? (charToVal[currentSequence[1]] || 0) : 0;
 
@@ -324,13 +323,12 @@
                 let idx = Math.floor(normRand * 5);
                 return NOTE_LENGTHS[idx];
             } else if (mode === "musical") {
-                // それっぽい音の長さ（BPMをキープしやすい音楽的重み付け）
-                // 16分: 5% / 8分: 35% / 4分: 45% / 2分: 12% / 全音符: 3%
-                if (normRand < 0.05) return NOTE_LENGTHS[0];
-                else if (normRand < 0.40) return NOTE_LENGTHS[1];
-                else if (normRand < 0.85) return NOTE_LENGTHS[2];
-                else if (normRand < 0.97) return NOTE_LENGTHS[3];
-                else return NOTE_LENGTHS[4];
+                // それっぽい音の長さ（音楽的重み付け）
+                if (normRand < 0.05) return NOTE_LENGTHS[0];      // 16分
+                else if (normRand < 0.40) return NOTE_LENGTHS[1]; // 8分
+                else if (normRand < 0.85) return NOTE_LENGTHS[2]; // 4分
+                else if (normRand < 0.97) return NOTE_LENGTHS[3]; // 2分
+                else return NOTE_LENGTHS[4];                      // 全音
             }
         }
 
@@ -397,26 +395,41 @@
             document.getElementById("tempoVal").innerText = val;
         }
 
+        // --- 安全設計に修正された高精度音響生成エンジン ---
         function playTone(pitch, duration) {
-            if (!audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
+            // 例外的な極小時間を防ぐセーフガード
+            if (duration <= 0) duration = 0.1;
 
-            const now = audioCtx.currentTime;
-            const freq = 440 * Math.pow(2, (pitch - 69) / 12);
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
 
-            osc.frequency.setValueAtTime(freq, now);
-            osc.type = 'triangle';
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
 
-            gainNode.gain.setValueAtTime(0, now);
-            gainNode.gain.linearRampToValueAtTime(0.2, now + 0.02);
-            gainNode.gain.setValueAtTime(0.2, now + duration - 0.03);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                const now = audioCtx.currentTime;
+                const freq = 440 * Math.pow(2, (pitch - 69) / 12);
 
-            osc.start(now);
-            osc.stop(now + duration);
+                osc.frequency.setValueAtTime(freq, now);
+                osc.type = 'triangle';
+
+                // 比率による時間配置（時間の重複・逆転エラーを100%防止）
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.2, now + (duration * 0.15)); // 開始15%で音量最大
+                gainNode.gain.setValueAtTime(0.2, now + (duration * 0.80));          // 80%まで音量を維持
+                gainNode.gain.linearRampToValueAtTime(0.001, now + duration);        // 最後にかけて消音
+
+                osc.start(now);
+                osc.stop(now + duration);
+            } catch (err) {
+                console.warn("Audio playback failed: ", err);
+            }
         }
 
         function scheduleNextNote() {
@@ -451,11 +464,16 @@
         function startPlaying() {
             if (isPlaying) return;
 
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
+            // ユーザーアクションのタイミングで音声コンテキストを初期化
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+            } catch (e) {
+                console.error("Failed to initialize audio context: ", e);
             }
 
             const source = document.getElementById("sourceSelect").value;
