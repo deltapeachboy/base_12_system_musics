@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター (音響エラー修正版)</title>
+    <title>12進法数理音楽ジェネレーター (完全安定版)</title>
     <!-- MIDIファイル生成用のライブラリ -->
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
     <!-- 楽譜描画用のライブラリ (abcjs) -->
@@ -221,6 +221,10 @@
             let intStr = parts[0] || '0';
             let fracStr = parts[1] || '';
 
+            // 数字以外の例外文字をスルーするための安全策
+            if (!/^[0-9]+$/.test(intStr)) intStr = '0';
+            if (fracStr && !/^[0-9]+$/.test(fracStr)) fracStr = '';
+
             let intVal = BigInt(intStr);
             let intDigits = [];
             if (intVal === 0n) {
@@ -268,7 +272,7 @@
             if (source === "custom") {
                 input.style.display = "inline-block";
                 shuffleBtn.style.display = "none";
-                input.focus();
+                input.value = "";
                 currentSequence = "";
                 updateDisplay("[数値を入力してください]");
                 document.getElementById("paper").innerHTML = "<p style='color:#666;'>数値を入力すると楽譜が生成されます</p>";
@@ -287,10 +291,23 @@
 
         function onCustomInput() {
             const inputVal = document.getElementById("customInput").value;
-            if (inputVal) {
-                currentSequence = convertBase10toBase12(inputVal);
-                updateDisplay(currentSequence);
-                updateScore();
+            // 未完成の入力（空欄やピリオド単体など）でのクラッシュを防ぐセーフガード
+            if (!inputVal || inputVal === "." || !/[0-9]/.test(inputVal)) {
+                currentSequence = "";
+                updateDisplay("[有効な数値を入力してください]");
+                document.getElementById("paper").innerHTML = "<p style='color:#666;'>数値を入力すると楽譜が生成されます</p>";
+                return;
+            }
+            try {
+                // 入力文字列から数字とピリオドのみを安全に抽出
+                let sanitized = inputVal.replace(/[^0-9.]/g, '');
+                if (sanitized) {
+                    currentSequence = convertBase10toBase12(sanitized);
+                    updateDisplay(currentSequence);
+                    updateScore();
+                }
+            } catch (e) {
+                console.warn("Input processing skipped: ", e);
             }
         }
 
@@ -305,7 +322,7 @@
             }
         }
 
-        // 擬似乱数アルゴリズム（クラッシュ対策のセーフガード付き）
+        // 擬似乱数アルゴリズム（クラッシュ対策・データ同期）
         function getDeterministicDuration(index, mode) {
             if (mode === "fixed") {
                 return NOTE_LENGTHS[2]; // 4分音符
@@ -319,16 +336,16 @@
             let normRand = pseudoRand / 233280.0;
 
             if (mode === "random") {
-                // 完全ランダム（16分, 8分, 4分, 2分, 全音符が一律同じ確率）
+                // 完全ランダム
                 let idx = Math.floor(normRand * 5);
                 return NOTE_LENGTHS[idx];
             } else if (mode === "musical") {
                 // それっぽい音の長さ（音楽的重み付け）
-                if (normRand < 0.05) return NOTE_LENGTHS[0];      // 16分
-                else if (normRand < 0.40) return NOTE_LENGTHS[1]; // 8分
-                else if (normRand < 0.85) return NOTE_LENGTHS[2]; // 4分
-                else if (normRand < 0.97) return NOTE_LENGTHS[3]; // 2分
-                else return NOTE_LENGTHS[4];                      // 全音
+                if (normRand < 0.05) return NOTE_LENGTHS[0];      // 16分 (5%)
+                else if (normRand < 0.40) return NOTE_LENGTHS[1]; // 8分 (35%)
+                else if (normRand < 0.85) return NOTE_LENGTHS[2]; // 4分 (45%)
+                else if (normRand < 0.97) return NOTE_LENGTHS[3]; // 2分 (12%)
+                else return NOTE_LENGTHS[4];                      // 全音 (3%)
             }
         }
 
@@ -358,7 +375,7 @@
                 const val = charToVal[char];
                 if (val === undefined) continue;
 
-                // ピッチの計算（メジャー等のスケール情報を反映）
+                // ピッチの計算
                 const degree = val % scaleLen;
                 const octaveShift = Math.floor(val / scaleLen);
                 const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
@@ -395,9 +412,8 @@
             document.getElementById("tempoVal").innerText = val;
         }
 
-        // --- 安全設計に修正された高精度音響生成エンジン ---
+        // --- 音響生成エンジン (時間の逆転・重複を解消) ---
         function playTone(pitch, duration) {
-            // 例外的な極小時間を防ぐセーフガード
             if (duration <= 0) duration = 0.1;
 
             try {
@@ -419,16 +435,16 @@
                 osc.frequency.setValueAtTime(freq, now);
                 osc.type = 'triangle';
 
-                // 比率による時間配置（時間の重複・逆転エラーを100%防止）
+                // 完全な比率制御によるフェード処理
                 gainNode.gain.setValueAtTime(0, now);
-                gainNode.gain.linearRampToValueAtTime(0.2, now + (duration * 0.15)); // 開始15%で音量最大
-                gainNode.gain.setValueAtTime(0.2, now + (duration * 0.80));          // 80%まで音量を維持
-                gainNode.gain.linearRampToValueAtTime(0.001, now + duration);        // 最後にかけて消音
+                gainNode.gain.linearRampToValueAtTime(0.2, now + (duration * 0.15));
+                gainNode.gain.setValueAtTime(0.2, now + (duration * 0.80));
+                gainNode.gain.linearRampToValueAtTime(0.001, now + duration);
 
                 osc.start(now);
                 osc.stop(now + duration);
             } catch (err) {
-                console.warn("Audio playback failed: ", err);
+                console.warn("Audio playback exception: ", err);
             }
         }
 
@@ -464,7 +480,6 @@
         function startPlaying() {
             if (isPlaying) return;
 
-            // ユーザーアクションのタイミングで音声コンテキストを初期化
             try {
                 if (!audioCtx) {
                     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -473,7 +488,7 @@
                     audioCtx.resume();
                 }
             } catch (e) {
-                console.error("Failed to initialize audio context: ", e);
+                console.error("Audio initialization error: ", e);
             }
 
             const source = document.getElementById("sourceSelect").value;
