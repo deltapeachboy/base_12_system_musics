@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター ＆ 楽譜表示</title>
+    <title>12進法数理音楽 ＆ リズムアルゴリズムジェネレーター</title>
     <!-- MIDIファイル生成用のライブラリ -->
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
     <!-- 楽譜描画用のライブラリ (abcjs) -->
@@ -44,6 +44,8 @@
         #stopBtn:hover { background-color: #da190b; }
         #downloadBtn { background-color: #00bcd4; color: white; }
         #downloadBtn:hover { background-color: #00a0b5; }
+        #shuffleBtn { background-color: #ff9800; color: white; }
+        #shuffleBtn:hover { background-color: #e65100; }
 
         .param {
             margin: 12px 0;
@@ -67,7 +69,7 @@
             background-color: #111;
             padding: 20px;
             border-radius: 8px;
-            height: 120px;
+            height: 100px;
             overflow-y: auto;
             text-align: left;
             word-break: break-all;
@@ -85,7 +87,6 @@
             transform: scale(1.2);
             border-radius: 3px;
         }
-        /* 楽譜表示エリアのスタイル */
         .score-container {
             max-width: 800px;
             margin: 20px auto;
@@ -109,7 +110,7 @@
 <body>
 
     <h1>12進法数理音楽ジェネレーター</h1>
-    <p class="subtitle">数理定数や任意の数値から、12音階ベースのメロディを五線譜と音で表現</p>
+    <p class="subtitle">音階とリズム設計により、不規則な数列を128音の美しい楽譜と響きにマッピング</p>
 
     <div class="controls">
         <div class="param">
@@ -118,9 +119,11 @@
                 <option value="pi">円周率 (Pi - π)</option>
                 <option value="e">ネイピア数 (e)</option>
                 <option value="phi">黄金比 (Phi - φ)</option>
+                <option value="random1000">ランダム生成 (1000桁)</option>
                 <option value="custom">自由入力 (10進数)</option>
             </select>
             <input type="text" id="customInput" placeholder="例: 3.14159265" oninput="onCustomInput()" style="display: none; width: 200px;">
+            <button id="shuffleBtn" onclick="generateRandomSequence()" style="display: none;">新曲を再生成</button>
         </div>
 
         <div class="param">
@@ -143,7 +146,12 @@
         </div>
 
         <div class="param">
-            <label><input type="checkbox" id="randomDuration" checked> 音の長さをランダムにする</label>
+            <label for="rhythmSelect">リズム設定:</label>
+            <select id="rhythmSelect" onchange="updateScore()">
+                <option value="musical">それっぽいリズム (音楽的)</option>
+                <option value="random">完全にランダムな長さ</option>
+                <option value="fixed">4分音符固定</option>
+            </select>
         </div>
 
         <div class="param">
@@ -163,12 +171,11 @@
 
     <!-- 楽譜描画エリア -->
     <div class="score-container">
-        <div class="score-title">自動生成楽譜（先頭64音プレビュー）</div>
+        <div class="score-title">自動生成楽譜（先頭128音同期プレビュー）</div>
         <div id="paper"></div>
     </div>
 
     <script>
-        // プリセット（12進法1000桁/500桁データ）
         const PRESETS = {
             pi: "3184809493B918664573A6211BB151551A05729290A7809A492742140A60A55256A0661A03753A3AA54805646880181A3683726785B88481B5300B2931A914841B55B09710321A808BB50BB49397986B7AA69B2BB03395BB5A12271813AA27AA22080065798317BB2B9A0AA5269A968412B7100B97B1A569A5A4A579B1BB154181B15BB5AA92694086B1AA020BB5B12A45A00790757913A17B805315570B202319A46602357A690B810052309B749B0AA672652B1AA9BB642279B6AA7BB2478553A81A858712211993206A7049811A67B158A594008B490B4A01552BB06B316930B48A141A87780005701B4B6985A9A7A250085186A91A572AA1AA1B1015BB25927A0B507204A1B028B962A292BB20150A6BB4193557A3BB15AA62B0295BB56037A8B73A2AA1330A2AA526AA040BB250B86121BB0B6B1BB56691458A5021AA21AA93A307B696BB26BB265507B95AA3307521BB25902B33AA9502931A94AA5846B21AA170A06B99B9A7BB196B962557AA7BB146B8B5256BB06692825838BB2AA8AA986047A3B7A8B49479BB100827299047A2215A447B95B8A88AA6B5B31AA721021AA950B205319A5B2032BB1B913A4661B1B5B2BB594AA03BB5A73708A89AA27830B309A4A69818BB1B6B2B9A1A109A888BB16912AA4B93BB2BB2B9AA952AA2BB249821AA4B904A2AA17BB102919A30A8653A8A91A82BB15591A507802B3BB256BB057A7799047AA57AA17502B0886AA55940BB15A9A06AA7947118AA694BB15AA6",
             e: "28752360567B15B760447A5A0A4B3A8B1013A492651B63098B227A6849BB99A61B563B81232B455322976A0B4272BB77610A3816578749B4BB58064A135111B3472BB7928BB01211756543A884AA6058A2A562BB2B8529341498B82BB256385B22938B86BB44B4A4B1A0A3886574AA12BB112A6197368B0A5A7206A2695570BB04812349BB3A5016259A440A59740BB259A7220BB1537A5B02506B1A89B064A2BB057A7799047AA57AA17502B0886AA55940BB15A9A06AA7947118AA694BB15AA6",
@@ -185,7 +192,14 @@
             chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
         };
 
-        // MIDIノート番号からABC記法（楽譜テキスト）への変換テーブル
+        const NOTE_LENGTHS = [
+            { label: "16th", beats: 0.25, abc: "/4" },
+            { label: "8th", beats: 0.5, abc: "/2" },
+            { label: "Quarter", beats: 1.0, abc: "" },
+            { label: "Half", beats: 2.0, abc: "2" },
+            { label: "Whole", beats: 4.0, abc: "4" }
+        ];
+
         const midiToABCTable = {
             48: "C,", 49: "^C,", 50: "D,", 51: "^D,", 52: "E,", 53: "F,", 54: "^F,", 55: "G,", 56: "^G,", 57: "A,", 58: "^A,", 59: "B,",
             60: "C", 61: "^C", 62: "D", 63: "^D", 64: "E", 65: "F", 66: "^F", 67: "G", 68: "^G", 69: "A", 70: "^A", 71: "B",
@@ -199,8 +213,8 @@
         let nextNoteTimeout = null;
         let tempoBPM = 120;
         let currentSequence = "";
+        let generatedNoteData = [];
 
-        // 高精度10進数から12進数文字列へ変換（BigIntを使用）
         function convertBase10toBase12(numStr, precision = 1000) {
             let cleanStr = numStr.trim().replace(/ /g, '');
             let parts = cleanStr.split('.');
@@ -235,17 +249,36 @@
             return intDigits.join('') + fracDigits.join('');
         }
 
+        function generateRandomSequence() {
+            const chars = "0123456789AB";
+            let res = "";
+            for (let i = 0; i < 1000; i++) {
+                res += chars[Math.floor(Math.random() * 12)];
+            }
+            currentSequence = res;
+            updateDisplay(currentSequence);
+            updateScore();
+        }
+
         function onSourceChange() {
             const source = document.getElementById("sourceSelect").value;
             const input = document.getElementById("customInput");
+            const shuffleBtn = document.getElementById("shuffleBtn");
+
             if (source === "custom") {
                 input.style.display = "inline-block";
+                shuffleBtn.style.display = "none";
                 input.focus();
                 currentSequence = "";
                 updateDisplay("[数値を入力してください]");
                 document.getElementById("paper").innerHTML = "<p style='color:#666;'>数値を入力すると楽譜が生成されます</p>";
+            } else if (source === "random1000") {
+                input.style.display = "none";
+                shuffleBtn.style.display = "inline-block";
+                generateRandomSequence();
             } else {
                 input.style.display = "none";
+                shuffleBtn.style.display = "none";
                 currentSequence = PRESETS[source];
                 updateDisplay(currentSequence);
                 updateScore();
@@ -272,42 +305,86 @@
             }
         }
 
-        // --- 楽譜レンダリング機能 (abcjs) ---
+        // --- 擬似乱数による決定論的アルゴリズム（再生と楽譜、MIDIを完全一致させるため） ---
+        function getDeterministicDuration(index, mode) {
+            if (mode === "fixed") {
+                return NOTE_LENGTHS[2]; // 4分音符
+            }
+
+            // 簡単な線形合同法(LCG)によるハッシュシード生成
+            let startCharVal = charToVal[currentSequence[0]] || 0;
+            let secondCharVal = (currentSequence[1] ? charToVal[currentSequence[1]] : 0);
+            let seed = index + startCharVal * 11 + secondCharVal * 23;
+            let pseudoRand = (seed * 9301 + 49297) % 233280;
+            let normRand = pseudoRand / 233280.0; // 0.0〜1.0未満の乱数
+
+            if (mode === "random") {
+                // 完全ランダム（等確率 20% ずつ）
+                let idx = Math.floor(normRand * 5);
+                return NOTE_LENGTHS[idx];
+            } else if (mode === "musical") {
+                // それっぽいリズム（音楽的な重み付け）
+                // 16分 (0.25拍): 5%  [0.00 〜 0.05)
+                // 8分  (0.5拍) : 35% [0.05 〜 0.40)
+                // 4分  (1.0拍) : 45% [0.40 〜 0.85)
+                // 2分  (2.0拍) : 12% [0.85 〜 0.97)
+                // 全音  (4.0拍) : 3%  [0.97 〜 1.00]
+                if (normRand < 0.05) return NOTE_LENGTHS[0];
+                else if (normRand < 0.40) return NOTE_LENGTHS[1];
+                else if (normRand < 0.85) return NOTE_LENGTHS[2];
+                else if (normRand < 0.97) return NOTE_LENGTHS[3];
+                else return NOTE_LENGTHS[4];
+            }
+        }
+
+        // 楽譜レンダリング (最大128音同期対応)
         function updateScore() {
             if (!currentSequence) return;
 
             const rootKey = document.getElementById("rootSelect").value;
             const scaleName = document.getElementById("scaleSelect").value;
+            const rhythmMode = document.getElementById("rhythmSelect").value;
+
             const rootMidi = ROOT_NOTES[rootKey];
             const scaleIntervals = SCALES[scaleName];
             const scaleLen = scaleIntervals.length;
 
             let abcNotes = "";
-            // 表示上の軽快さのため、先頭の64音（16小節分）を楽譜プレビューにレンダリングします
-            let limit = Math.min(currentSequence.length, 64);
+            let limit = Math.min(currentSequence.length, 128); // 128音へ拡張
+
+            generatedNoteData = [];
+            let measureBeats = 0;
 
             for (let i = 0; i < limit; i++) {
                 const char = currentSequence[i];
                 const val = charToVal[char];
                 if (val === undefined) continue;
 
+                // ピッチ
                 const degree = val % scaleLen;
                 const octaveShift = Math.floor(val / scaleLen);
                 const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
-
                 const abcChar = midiToABCTable[pitch] || "z";
-                abcNotes += abcChar + " ";
 
-                // 4音ごとに小節線（|）を引く
-                if ((i + 1) % 4 === 0 && i < limit - 1) {
+                // 音符長アルゴリズムの適用
+                const durationObj = getDeterministicDuration(i, rhythmMode);
+
+                generatedNoteData.push({
+                    pitch: pitch,
+                    beats: durationObj.beats
+                });
+
+                abcNotes += abcChar + durationObj.abc + " ";
+                measureBeats += durationObj.beats;
+
+                if (measureBeats >= 4.0) {
                     abcNotes += "| ";
+                    measureBeats = 0;
                 }
             }
 
-            // ABC記法フォーマット文字列（临时記号を明示するためキーはCに固定し、音符側で#等を付与）
             const abcString = `X:1\nT:\nM:4/4\nL:1/4\nK:C\n${abcNotes}|]`;
 
-            // 楽譜の描画を実行
             ABCJS.renderAbc("paper", abcString, {
                 responsive: "resize",
                 staffwidth: 740
@@ -334,7 +411,7 @@
 
             gainNode.gain.setValueAtTime(0, now);
             gainNode.gain.linearRampToValueAtTime(0.2, now + 0.02);
-            gainNode.gain.setValueAtTime(0.2, now + duration - 0.05);
+            gainNode.gain.setValueAtTime(0.2, now + duration - 0.03);
             gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
             osc.start(now);
@@ -344,7 +421,8 @@
         function scheduleNextNote() {
             if (!isPlaying) return;
 
-            if (currentIndex >= currentSequence.length) {
+            // 128音までループ再生
+            if (currentIndex >= generatedNoteData.length) {
                 stopPlaying();
                 return;
             }
@@ -360,36 +438,25 @@
                 activeSpan.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
 
-            const char = currentSequence[currentIndex];
-            const val = charToVal[char];
+            const noteInfo = generatedNoteData[currentIndex];
+            const pitch = noteInfo.pitch;
+            const beats = noteInfo.beats;
+            const noteDurationSec = beats * (60 / tempoBPM);
 
-            if (val !== undefined) {
-                const rootMidi = ROOT_NOTES[document.getElementById("rootSelect").value];
-                const scaleIntervals = SCALES[document.getElementById("scaleSelect").value];
-                const scaleLen = scaleIntervals.length;
-
-                const degree = val % scaleLen;
-                const octaveShift = Math.floor(val / scaleLen);
-                const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
-
-                let noteDurationSec;
-                if (document.getElementById("randomDuration").checked) {
-                    noteDurationSec = Math.random() * 1.15 + 0.05;
-                } else {
-                    noteDurationSec = 60 / tempoBPM;
-                }
-
-                playTone(pitch, noteDurationSec);
-                currentIndex++;
-                nextNoteTimeout = setTimeout(scheduleNextNote, noteDurationSec * 1000);
-            } else {
-                currentIndex++;
-                scheduleNextNote();
-            }
+            playTone(pitch, noteDurationSec);
+            currentIndex++;
+            nextNoteTimeout = setTimeout(scheduleNextNote, noteDurationSec * 1000);
         }
 
         function startPlaying() {
             if (isPlaying) return;
+
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
 
             const source = document.getElementById("sourceSelect").value;
             if (source === "custom") {
@@ -400,16 +467,13 @@
                 }
                 currentSequence = convertBase10toBase12(inputVal);
                 updateDisplay(currentSequence);
+            } else if (source === "random1000") {
+                // そのまま
             } else {
                 currentSequence = PRESETS[source];
             }
 
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            updateScore();
 
             isPlaying = true;
             currentIndex = 0;
@@ -431,47 +495,20 @@
                 return;
             }
 
-            const source = document.getElementById("sourceSelect").value;
-            if (source === "custom") {
-                const inputVal = document.getElementById("customInput").value;
-                if (!inputVal) {
-                    alert("10進数を入力してください。");
-                    return;
-                }
-                currentSequence = convertBase10toBase12(inputVal);
-            } else {
-                currentSequence = PRESETS[source];
+            if (generatedNoteData.length === 0) {
+                updateScore();
             }
 
             const track = new MidiWriter.Track();
             track.setTempo(tempoBPM);
 
-            const isRandom = document.getElementById("randomDuration").checked;
-            const rootMidi = ROOT_NOTES[document.getElementById("rootSelect").value];
-            const scaleIntervals = SCALES[document.getElementById("scaleSelect").value];
-            const scaleLen = scaleIntervals.length;
-
-            for (let i = 0; i < currentSequence.length; i++) {
-                const char = currentSequence[i];
-                const val = charToVal[char];
-                if (val === undefined) continue;
-
-                const degree = val % scaleLen;
-                const octaveShift = Math.floor(val / scaleLen);
-                const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
-
-                let durationSec;
-                if (isRandom) {
-                    durationSec = Math.random() * 1.15 + 0.05;
-                } else {
-                    durationSec = 60 / tempoBPM;
-                }
-
+            for (let i = 0; i < generatedNoteData.length; i++) {
+                const noteInfo = generatedNoteData[i];
                 const ticksPerBeat = 128;
-                const ticks = durationSec * (ticksPerBeat * tempoBPM / 60);
+                const ticks = noteInfo.beats * ticksPerBeat;
 
                 const noteEvent = new MidiWriter.NoteEvent({
-                    pitch: [pitch],
+                    pitch: [noteInfo.pitch],
                     duration: 'T' + Math.round(ticks),
                     velocity: 90
                 });
@@ -483,13 +520,12 @@
 
             const link = document.createElement('a');
             link.href = dataUri;
-            link.download = `pi_base12_${source}.mid`;
+            link.download = `music_b12_128notes.mid`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
         }
 
-        // 初期表示
         onSourceChange();
     </script>
 </body>
