@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター</title>
+    <title>12進法数理音楽ジェネレーター ＆ 楽譜表示</title>
     <!-- MIDIファイル生成用のライブラリ -->
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
+    <!-- 楽譜描画用のライブラリ (abcjs) -->
+    <script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/dist/abcjs-basic-min.js"></script>
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -65,7 +67,7 @@
             background-color: #111;
             padding: 20px;
             border-radius: 8px;
-            height: 200px;
+            height: 120px;
             overflow-y: auto;
             text-align: left;
             word-break: break-all;
@@ -83,12 +85,31 @@
             transform: scale(1.2);
             border-radius: 3px;
         }
+        /* 楽譜表示エリアのスタイル */
+        .score-container {
+            max-width: 800px;
+            margin: 20px auto;
+            background-color: white;
+            color: black;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            overflow-x: auto;
+        }
+        .score-title {
+            color: #2b2b2b;
+            margin-top: 0;
+            font-size: 1.2rem;
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 5px;
+            text-align: left;
+        }
     </style>
 </head>
 <body>
 
     <h1>12進法数理音楽ジェネレーター</h1>
-    <p class="subtitle">数理定数や任意の数値から、12音階ベースのメロディを紡ぎ出すアプリ</p>
+    <p class="subtitle">数理定数や任意の数値から、12音階ベースのメロディを五線譜と音で表現</p>
 
     <div class="controls">
         <div class="param">
@@ -99,12 +120,12 @@
                 <option value="phi">黄金比 (Phi - φ)</option>
                 <option value="custom">自由入力 (10進数)</option>
             </select>
-            <input type="text" id="customInput" placeholder="例: 3.14159265" style="display: none; width: 200px;">
+            <input type="text" id="customInput" placeholder="例: 3.14159265" oninput="onCustomInput()" style="display: none; width: 200px;">
         </div>
 
         <div class="param">
             <label for="rootSelect">キー:</label>
-            <select id="rootSelect">
+            <select id="rootSelect" onchange="updateScore()">
                 <option value="C">C</option><option value="C#">C#</option><option value="D">D</option>
                 <option value="D#">D#</option><option value="E">E</option><option value="F">F</option>
                 <option value="F#">F#</option><option value="G">G</option><option value="G#">G#</option>
@@ -112,7 +133,7 @@
             </select>
 
             <label for="scaleSelect">音階:</label>
-            <select id="scaleSelect">
+            <select id="scaleSelect" onchange="updateScore()">
                 <option value="major">Major (メジャー)</option>
                 <option value="minor">Natural Minor (マイナー)</option>
                 <option value="pentatonic">Pentatonic Major (ペンタトニック)</option>
@@ -137,7 +158,14 @@
         </div>
     </div>
 
+    <!-- 数値プレビューエリア -->
     <div class="display-container" id="digitContainer"></div>
+
+    <!-- 楽譜描画エリア -->
+    <div class="score-container">
+        <div class="score-title">自動生成楽譜（先頭64音プレビュー）</div>
+        <div id="paper"></div>
+    </div>
 
     <script>
         // プリセット（12進法1000桁/500桁データ）
@@ -155,6 +183,14 @@
             pentatonic: [0, 2, 4, 7, 9],
             japanese: [0, 1, 5, 7, 8],
             chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        };
+
+        // MIDIノート番号からABC記法（楽譜テキスト）への変換テーブル
+        const midiToABCTable = {
+            48: "C,", 49: "^C,", 50: "D,", 51: "^D,", 52: "E,", 53: "F,", 54: "^F,", 55: "G,", 56: "^G,", 57: "A,", 58: "^A,", 59: "B,",
+            60: "C", 61: "^C", 62: "D", 63: "^D", 64: "E", 65: "F", 66: "^F", 67: "G", 68: "^G", 69: "A", 70: "^A", 71: "B",
+            72: "c", 73: "^c", 74: "d", 75: "^d", 76: "e", 77: "f", 78: "^f", 79: "g", 80: "^g", 81: "a", 82: "^a", 83: "b",
+            84: "c'", 85: "^c'", 86: "d'", 87: "^d'", 88: "e'", 89: "f'", 90: "^f'", 91: "g'", 92: "^g'", 93: "a'", 94: "^a'", 95: "b'"
         };
 
         let audioCtx = null;
@@ -205,11 +241,23 @@
             if (source === "custom") {
                 input.style.display = "inline-block";
                 input.focus();
+                currentSequence = "";
                 updateDisplay("[数値を入力してください]");
+                document.getElementById("paper").innerHTML = "<p style='color:#666;'>数値を入力すると楽譜が生成されます</p>";
             } else {
                 input.style.display = "none";
                 currentSequence = PRESETS[source];
                 updateDisplay(currentSequence);
+                updateScore();
+            }
+        }
+
+        function onCustomInput() {
+            const inputVal = document.getElementById("customInput").value;
+            if (inputVal) {
+                currentSequence = convertBase10toBase12(inputVal);
+                updateDisplay(currentSequence);
+                updateScore();
             }
         }
 
@@ -222,6 +270,48 @@
                 span.innerText = seq[i];
                 container.appendChild(span);
             }
+        }
+
+        // --- 楽譜レンダリング機能 (abcjs) ---
+        function updateScore() {
+            if (!currentSequence) return;
+
+            const rootKey = document.getElementById("rootSelect").value;
+            const scaleName = document.getElementById("scaleSelect").value;
+            const rootMidi = ROOT_NOTES[rootKey];
+            const scaleIntervals = SCALES[scaleName];
+            const scaleLen = scaleIntervals.length;
+
+            let abcNotes = "";
+            // 表示上の軽快さのため、先頭の64音（16小節分）を楽譜プレビューにレンダリングします
+            let limit = Math.min(currentSequence.length, 64);
+
+            for (let i = 0; i < limit; i++) {
+                const char = currentSequence[i];
+                const val = charToVal[char];
+                if (val === undefined) continue;
+
+                const degree = val % scaleLen;
+                const octaveShift = Math.floor(val / scaleLen);
+                const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
+
+                const abcChar = midiToABCTable[pitch] || "z";
+                abcNotes += abcChar + " ";
+
+                // 4音ごとに小節線（|）を引く
+                if ((i + 1) % 4 === 0 && i < limit - 1) {
+                    abcNotes += "| ";
+                }
+            }
+
+            // ABC記法フォーマット文字列（临时記号を明示するためキーはCに固定し、音符側で#等を付与）
+            const abcString = `X:1\nT:\nM:4/4\nL:1/4\nK:C\n${abcNotes}|]`;
+
+            // 楽譜の描画を実行
+            ABCJS.renderAbc("paper", abcString, {
+                responsive: "resize",
+                staffwidth: 740
+            });
         }
 
         function updateTempo(val) {
