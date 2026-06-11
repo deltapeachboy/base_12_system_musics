@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター (完全安定版)</title>
+    <title>12進法数理音楽ジェネレーター (対応表付き完全版)</title>
     <!-- MIDIファイル生成用のライブラリ -->
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
     <!-- 楽譜描画用のライブラリ (abcjs) -->
@@ -24,7 +24,7 @@
             padding: 20px;
             border-radius: 10px;
             display: inline-block;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             max-width: 90%;
         }
@@ -87,6 +87,33 @@
             transform: scale(1.2);
             border-radius: 3px;
         }
+
+        /* 対応表のスタイル定義 */
+        .table-container {
+            max-width: 800px;
+            margin: 10px auto 20px auto;
+            background-color: #222;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            color: #e0e0e0;
+            font-size: 0.85rem;
+        }
+        th, td {
+            border: 1px solid #444;
+            padding: 6px;
+            text-align: center;
+            min-width: 45px;
+        }
+        th {
+            background-color: #111;
+        }
+
         .score-container {
             max-width: 800px;
             margin: 20px auto;
@@ -110,7 +137,7 @@
 <body>
 
     <h1>12進法数理音楽ジェネレーター</h1>
-    <p class="subtitle">音階とリズム設計により、不規則な数列を128音の美しい楽譜と響きにマッピング</p>
+    <p class="subtitle">音階とリズム設計により、不規則な数列を128音の美しい楽譜と響きにマッピング (インスピレーション等の取得にご利用ください)</p>
 
     <div class="controls">
         <div class="param">
@@ -164,6 +191,17 @@
             <button id="stopBtn" onclick="stopPlaying()">停止</button>
             <button id="downloadBtn" onclick="downloadMIDI()">GarageBand用MIDI保存</button>
         </div>
+    </div>
+
+    <!-- リアルタイム音対応表エリア -->
+    <div class="table-container">
+        <div style="color: #4fc3f7; font-weight: bold; margin-bottom: 8px; text-align: left; font-size: 0.9rem;">
+            現在の設定における「12進数 ⇄ 音名」の対応表
+        </div>
+        <table>
+            <tr id="trDigits"></tr>
+            <tr id="trNotes"></tr>
+        </table>
     </div>
 
     <!-- 数値プレビューエリア -->
@@ -221,7 +259,6 @@
             let intStr = parts[0] || '0';
             let fracStr = parts[1] || '';
 
-            // 数字以外の例外文字をスルーするための安全策
             if (!/^[0-9]+$/.test(intStr)) intStr = '0';
             if (fracStr && !/^[0-9]+$/.test(fracStr)) fracStr = '';
 
@@ -291,7 +328,6 @@
 
         function onCustomInput() {
             const inputVal = document.getElementById("customInput").value;
-            // 未完成の入力（空欄やピリオド単体など）でのクラッシュを防ぐセーフガード
             if (!inputVal || inputVal === "." || !/[0-9]/.test(inputVal)) {
                 currentSequence = "";
                 updateDisplay("[有効な数値を入力してください]");
@@ -299,7 +335,6 @@
                 return;
             }
             try {
-                // 入力文字列から数字とピリオドのみを安全に抽出
                 let sanitized = inputVal.replace(/[^0-9.]/g, '');
                 if (sanitized) {
                     currentSequence = convertBase10toBase12(sanitized);
@@ -322,10 +357,58 @@
             }
         }
 
-        // 擬似乱数アルゴリズム（クラッシュ対策・データ同期）
+        // MIDIの番号から標準的な音名表記(C4, D#4など)を取得するヘルパー関数
+        function getNoteName(midiNum) {
+            const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const octave = Math.floor(midiNum / 12) - 1;
+            const noteIndex = midiNum % 12;
+            return noteNames[noteIndex] + octave;
+        }
+
+        // 12進数 ⇄ 音階の対応関係をテーブル表示としてリアルタイム更新する関数
+        function updateMappingTable() {
+            const rootKey = document.getElementById("rootSelect").value;
+            const scaleName = document.getElementById("scaleSelect").value;
+
+            const rootMidi = ROOT_NOTES[rootKey];
+            const scaleIntervals = SCALES[scaleName];
+            const scaleLen = scaleIntervals.length;
+
+            const trDigits = document.getElementById("trDigits");
+            const trNotes = document.getElementById("trNotes");
+
+            // 行の初期化（ヘッダーラベルの追加）
+            trDigits.innerHTML = "<th style='background-color: #1a1a1a; color: #4fc3f7;'>12進数</th>";
+            trNotes.innerHTML = "<th style='background-color: #1a1a1a; color: #e0e0e0;'>音名</th>";
+
+            const chars = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B"];
+
+            // 0〜Bの12個の値を、現在選択されているスケール情報に基づいて計算しグリッドに挿入
+            for (let i = 0; i < 12; i++) {
+                const char = chars[i];
+                const val = i;
+
+                const degree = val % scaleLen;
+                const octaveShift = Math.floor(val / scaleLen);
+                const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
+
+                const noteName = getNoteName(pitch);
+
+                const thDigit = document.createElement("th");
+                thDigit.style.color = "#ffeb3b";
+                thDigit.innerText = char;
+                trDigits.appendChild(thDigit);
+
+                const tdNote = document.createElement("td");
+                tdNote.style.fontWeight = "bold";
+                tdNote.innerText = noteName;
+                trNotes.appendChild(tdNote);
+            }
+        }
+
         function getDeterministicDuration(index, mode) {
             if (mode === "fixed") {
-                return NOTE_LENGTHS[2]; // 4分音符
+                return NOTE_LENGTHS[2];
             }
 
             let startCharVal = (currentSequence && currentSequence.length > 0) ? (charToVal[currentSequence[0]] || 0) : 0;
@@ -336,21 +419,22 @@
             let normRand = pseudoRand / 233280.0;
 
             if (mode === "random") {
-                // 完全ランダム
                 let idx = Math.floor(normRand * 5);
                 return NOTE_LENGTHS[idx];
             } else if (mode === "musical") {
-                // それっぽい音の長さ（音楽的重み付け）
-                if (normRand < 0.05) return NOTE_LENGTHS[0];      // 16分 (5%)
-                else if (normRand < 0.40) return NOTE_LENGTHS[1]; // 8分 (35%)
-                else if (normRand < 0.85) return NOTE_LENGTHS[2]; // 4分 (45%)
-                else if (normRand < 0.97) return NOTE_LENGTHS[3]; // 2分 (12%)
-                else return NOTE_LENGTHS[4];                      // 全音 (3%)
+                if (normRand < 0.05) return NOTE_LENGTHS[0];
+                else if (normRand < 0.40) return NOTE_LENGTHS[1];
+                else if (normRand < 0.85) return NOTE_LENGTHS[2];
+                else if (normRand < 0.97) return NOTE_LENGTHS[3];
+                else return NOTE_LENGTHS[4];
             }
         }
 
-        // 楽譜レンダリング (最大128音同期対応)
+        // 楽譜レンダリング (128音同期)
         function updateScore() {
+            // スケール対応表も同時に自動更新
+            updateMappingTable();
+
             if (!currentSequence || currentSequence.length === 0) {
                 document.getElementById("paper").innerHTML = "<p style='color:#666;'>数値を入力すると楽譜が生成されます</p>";
                 return;
@@ -365,7 +449,7 @@
             const scaleLen = scaleIntervals.length;
 
             let abcNotes = "";
-            let limit = Math.min(currentSequence.length, 128); // 128音
+            let limit = Math.min(currentSequence.length, 128);
 
             generatedNoteData = [];
             let measureBeats = 0;
@@ -375,13 +459,11 @@
                 const val = charToVal[char];
                 if (val === undefined) continue;
 
-                // ピッチの計算
                 const degree = val % scaleLen;
                 const octaveShift = Math.floor(val / scaleLen);
                 const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
                 const abcChar = midiToABCTable[pitch] || "z";
 
-                // 音符長
                 const durationObj = getDeterministicDuration(i, rhythmMode);
 
                 generatedNoteData.push({
@@ -400,7 +482,6 @@
 
             const abcString = `X:1\nT:\nM:4/4\nL:1/4\nK:C\n${abcNotes}|]`;
 
-            // 楽譜描画
             ABCJS.renderAbc("paper", abcString, {
                 responsive: "resize",
                 staffwidth: 740
@@ -412,7 +493,6 @@
             document.getElementById("tempoVal").innerText = val;
         }
 
-        // --- 音響生成エンジン (時間の逆転・重複を解消) ---
         function playTone(pitch, duration) {
             if (duration <= 0) duration = 0.1;
 
@@ -435,7 +515,6 @@
                 osc.frequency.setValueAtTime(freq, now);
                 osc.type = 'triangle';
 
-                // 完全な比率制御によるフェード処理
                 gainNode.gain.setValueAtTime(0, now);
                 gainNode.gain.linearRampToValueAtTime(0.2, now + (duration * 0.15));
                 gainNode.gain.setValueAtTime(0.2, now + (duration * 0.80));
