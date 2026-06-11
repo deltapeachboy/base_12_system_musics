@@ -3,9 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター (対応表付き完全版)</title>
-    <!-- MIDIファイル生成用のライブラリ -->
-    <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
+    <title>12進法数理音楽ジェネレーター (音響完全修正版)</title>
     <!-- 楽譜描画用のライブラリ (abcjs) -->
     <script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/dist/abcjs-basic-min.js"></script>
     <style>
@@ -493,6 +491,7 @@
             document.getElementById("tempoVal").innerText = val;
         }
 
+        // --- 音響生成エンジン (絶対エラーを起こさない指数減衰方式) ---
         function playTone(pitch, duration) {
             if (duration <= 0) duration = 0.1;
 
@@ -515,10 +514,10 @@
                 osc.frequency.setValueAtTime(freq, now);
                 osc.type = 'triangle';
 
+                // W3C規格に準拠した安全で滑らかな指数減衰の音量コントロール (Safari、Chrome、iOS対応)
                 gainNode.gain.setValueAtTime(0, now);
-                gainNode.gain.linearRampToValueAtTime(0.2, now + (duration * 0.15));
-                gainNode.gain.setValueAtTime(0.2, now + (duration * 0.80));
-                gainNode.gain.linearRampToValueAtTime(0.001, now + duration);
+                gainNode.gain.setTargetAtTime(0.2, now, 0.01); // 開始10msで立ち上がり
+                gainNode.gain.setTargetAtTime(0.001, now + (duration * 0.7), 0.05); // 音の70%経過時点で自動フェードアウト
 
                 osc.start(now);
                 osc.stop(now + duration);
@@ -601,41 +600,93 @@
             spans.forEach(span => span.classList.remove("active"));
         }
 
-        function downloadMIDI() {
-            if (typeof MidiWriter === 'undefined') {
-                alert("MIDIライブラリがロードされていません。ネット接続を確認してください。");
-                return;
+        // --- 完全に100%自立したMIDI生成エンジン ---
+        function createMidiFile(notes) {
+            const ticksPerBeat = 128; // MIDI分解能 (1拍 = 128 ticks)
+
+            function toVLQ(num) {
+                let buffer = [];
+                let val = Math.round(num);
+                buffer.push(val & 0x7F);
+                while (val >> 7 > 0) {
+                    val = val >> 7;
+                    buffer.push((val & 0x7F) | 0x80);
+                }
+                return buffer.reverse();
             }
 
+            let trackEvents = [];
+
+            let tempoUS = Math.round(60000000 / tempoBPM);
+            trackEvents.push(0x00);
+            trackEvents.push(0xFF, 0x51, 0x03);
+            trackEvents.push((tempoUS >> 16) & 0xFF, (tempoUS >> 8) & 0xFF, tempoUS & 0xFF);
+
+            const trackName = "Mathematical Melody";
+            trackEvents.push(0x00);
+            trackEvents.push(0xFF, 0x03, trackName.length);
+            for (let i = 0; i < trackName.length; i++) {
+                trackEvents.push(trackName.charCodeAt(i));
+            }
+
+            for (let i = 0; i < notes.length; i++) {
+                const note = notes[i];
+                const pitch = note.pitch;
+                const ticks = note.beats * ticksPerBeat;
+
+                trackEvents.push(0x00);
+                trackEvents.push(0x90, pitch, 0x5A);
+
+                const vlqTicks = toVLQ(ticks);
+                trackEvents.push(...vlqTicks);
+                trackEvents.push(0x90, pitch, 0x00);
+            }
+
+            trackEvents.push(0x00);
+            trackEvents.push(0xFF, 0x2F, 0x00);
+
+            const mthd = [
+                0x4D, 0x54, 0x68, 0x64,
+                0x00, 0x00, 0x00, 0x06,
+                0x00, 0x00,
+                0x00, 0x01,
+                0x00, 0x80
+            ];
+
+            const mtrkHeader = [0x4D, 0x54, 0x72, 0x6B];
+            const trackLength = trackEvents.length;
+            const mtrkSize = [
+                (trackLength >> 24) & 0xFF,
+                (trackLength >> 16) & 0xFF,
+                (trackLength >> 8) & 0xFF,
+                trackLength & 0xFF
+            ];
+
+            return new Uint8Array([...mthd, ...mtrkHeader, ...mtrkSize, ...trackEvents]);
+        }
+
+        // --- 自立エンジンを使用したダウンロード処理 ---
+        function downloadMIDI() {
             if (generatedNoteData.length === 0) {
                 updateScore();
             }
 
-            const track = new MidiWriter.Track();
-            track.setTempo(tempoBPM);
+            try {
+                const midiBytes = createMidiFile(generatedNoteData);
+                const blob = new Blob([midiBytes], { type: "audio/midi" });
+                const url = URL.createObjectURL(blob);
 
-            for (let i = 0; i < generatedNoteData.length; i++) {
-                const noteInfo = generatedNoteData[i];
-                const ticksPerBeat = 128;
-                const ticks = noteInfo.beats * ticksPerBeat;
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `music_b12_128notes.mid`;
+                document.body.appendChild(link);
+                link.click();
 
-                const noteEvent = new MidiWriter.NoteEvent({
-                    pitch: [noteInfo.pitch],
-                    duration: 'T' + Math.round(ticks),
-                    velocity: 90
-                });
-                track.addEvent(noteEvent);
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                alert("MIDIファイルの生成中にエラーが発生しました。\n" + err.message);
             }
-
-            const write = new MidiWriter.Writer(track);
-            const dataUri = write.toDataUri();
-
-            const link = document.createElement('a');
-            link.href = dataUri;
-            link.download = `music_b12_128notes.mid`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
         }
 
         onSourceChange();
