@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12進法数理音楽ジェネレーター</title>
+    <!-- MIDIファイル生成用のライブラリ -->
+    <script src="https://cdn.jsdelivr.net/npm/midi-writer-js/build/index.browser.js"></script>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            text-align: center;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 { color: #4fc3f7; margin-bottom: 5px; }
+        p.subtitle { color: #888; margin-top: 0; font-size: 0.9rem; }
+        .controls {
+            background-color: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            display: inline-block;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            max-width: 90%;
+        }
+        button {
+            font-size: 1rem;
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        #playBtn { background-color: #4caf50; color: white; }
+        #playBtn:hover { background-color: #45a049; }
+        #stopBtn { background-color: #f44336; color: white; }
+        #stopBtn:hover { background-color: #da190b; }
+        #downloadBtn { background-color: #00bcd4; color: white; }
+        #downloadBtn:hover { background-color: #00a0b5; }
+
+        .param {
+            margin: 12px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        label { font-size: 0.9rem; }
+        input[type="text"], select {
+            background-color: #111;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        .display-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #111;
+            padding: 20px;
+            border-radius: 8px;
+            height: 200px;
+            overflow-y: auto;
+            text-align: left;
+            word-break: break-all;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+        .digit { transition: all 0.1s; color: #555; padding: 0 1px; display: inline-block; }
+        .digit.played { color: #888; }
+        .digit.active {
+            color: #ffeb3b;
+            background-color: #e65100;
+            font-weight: bold;
+            transform: scale(1.2);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>12進法数理音楽ジェネレーター</h1>
+    <p class="subtitle">数理定数や任意の数値から、12音階ベースのメロディを紡ぎ出すアプリ</p>
+
+    <div class="controls">
+        <div class="param">
+            <label for="sourceSelect">数値ソース:</label>
+            <select id="sourceSelect" onchange="onSourceChange()">
+                <option value="pi">円周率 (Pi - π)</option>
+                <option value="e">ネイピア数 (e)</option>
+                <option value="phi">黄金比 (Phi - φ)</option>
+                <option value="custom">自由入力 (10進数)</option>
+            </select>
+            <input type="text" id="customInput" placeholder="例: 3.14159265" style="display: none; width: 200px;">
+        </div>
+
+        <div class="param">
+            <label for="rootSelect">キー:</label>
+            <select id="rootSelect">
+                <option value="C">C</option><option value="C#">C#</option><option value="D">D</option>
+                <option value="D#">D#</option><option value="E">E</option><option value="F">F</option>
+                <option value="F#">F#</option><option value="G">G</option><option value="G#">G#</option>
+                <option value="A">A</option><option value="A#">A#</option><option value="B">B</option>
+            </select>
+
+            <label for="scaleSelect">音階:</label>
+            <select id="scaleSelect">
+                <option value="major">Major (メジャー)</option>
+                <option value="minor">Natural Minor (マイナー)</option>
+                <option value="pentatonic">Pentatonic Major (ペンタトニック)</option>
+                <option value="japanese">Japanese (和風音階)</option>
+                <option value="chromatic">Chromatic (クロマチック/12音)</option>
+            </select>
+        </div>
+
+        <div class="param">
+            <label><input type="checkbox" id="randomDuration" checked> 音の長さをランダムにする</label>
+        </div>
+
+        <div class="param">
+            <label for="tempo">基準テンポ (BPM): <span id="tempoVal">120</span></label>
+            <input type="range" id="tempo" min="60" max="240" value="120" oninput="updateTempo(this.value)">
+        </div>
+
+        <div>
+            <button id="playBtn" onclick="startPlaying()">再生</button>
+            <button id="stopBtn" onclick="stopPlaying()">停止</button>
+            <button id="downloadBtn" onclick="downloadMIDI()">GarageBand用MIDI保存</button>
+        </div>
+    </div>
+
+    <div class="display-container" id="digitContainer"></div>
+
+    <script>
+        // プリセット（12進法1000桁/500桁データ）
+        const PRESETS = {
+            pi: "3184809493B918664573A6211BB151551A05729290A7809A492742140A60A55256A0661A03753A3AA54805646880181A3683726785B88481B5300B2931A914841B55B09710321A808BB50BB49397986B7AA69B2BB03395BB5A12271813AA27AA22080065798317BB2B9A0AA5269A968412B7100B97B1A569A5A4A579B1BB154181B15BB5AA92694086B1AA020BB5B12A45A00790757913A17B805315570B202319A46602357A690B810052309B749B0AA672652B1AA9BB642279B6AA7BB2478553A81A858712211993206A7049811A67B158A594008B490B4A01552BB06B316930B48A141A87780005701B4B6985A9A7A250085186A91A572AA1AA1B1015BB25927A0B507204A1B028B962A292BB20150A6BB4193557A3BB15AA62B0295BB56037A8B73A2AA1330A2AA526AA040BB250B86121BB0B6B1BB56691458A5021AA21AA93A307B696BB26BB265507B95AA3307521BB25902B33AA9502931A94AA5846B21AA170A06B99B9A7BB196B962557AA7BB146B8B5256BB06692825838BB2AA8AA986047A3B7A8B49479BB100827299047A2215A447B95B8A88AA6B5B31AA721021AA950B205319A5B2032BB1B913A4661B1B5B2BB594AA03BB5A73708A89AA27830B309A4A69818BB1B6B2B9A1A109A888BB16912AA4B93BB2BB2B9AA952AA2BB249821AA4B904A2AA17BB102919A30A8653A8A91A82BB15591A507802B3BB256BB057A7799047AA57AA17502B0886AA55940BB15A9A06AA7947118AA694BB15AA6",
+            e: "28752360567B15B760447A5A0A4B3A8B1013A492651B63098B227A6849BB99A61B563B81232B455322976A0B4272BB77610A3816578749B4BB58064A135111B3472BB7928BB01211756543A884AA6058A2A562BB2B8529341498B82BB256385B22938B86BB44B4A4B1A0A3886574AA12BB112A6197368B0A5A7206A2695570BB04812349BB3A5016259A440A59740BB259A7220BB1537A5B02506B1A89B064A2BB057A7799047AA57AA17502B0886AA55940BB15A9A06AA7947118AA694BB15AA6",
+            phi: "174BBA239B228B0284560759368310B13A17B60A1366113A63B40751B78B069300BB8031AA13B44B36A7A6BB4620A0BB552AA639A458AA22359A658AA10457A9BB1B18556779A6372579B0A307B23B28BB10257B4AA198BB1A25B36AA015AA6A2750BB047A33AA0BB152179831A603BB2AA1998522A04B1059B515AA0BB1A832A267A04B8A5A405BB2A5AA06691AA3307521A1A86BB053308AA5B2032BB1B913A4661B1B5B2BB594AA03BB5A73708A89AA27830B309A4A69818BB1B6B2B9A1A109A888BB16912AA4B93BB2BB2B9AA95"
+        };
+
+        const charToVal = { '0':0, '1':1, '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, 'A':10, 'B':11 };
+        const ROOT_NOTES = { 'C':60, 'C#':61, 'D':62, 'D#':63, 'E':64, 'F':65, 'F#':66, 'G':67, 'G#':68, 'A':69, 'A#':70, 'B':71 };
+        const SCALES = {
+            major: [0, 2, 4, 5, 7, 9, 11],
+            minor: [0, 2, 3, 5, 7, 8, 10],
+            pentatonic: [0, 2, 4, 7, 9],
+            japanese: [0, 1, 5, 7, 8],
+            chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        };
+
+        let audioCtx = null;
+        let isPlaying = false;
+        let currentIndex = 0;
+        let nextNoteTimeout = null;
+        let tempoBPM = 120;
+        let currentSequence = "";
+
+        // 高精度10進数から12進数文字列へ変換（BigIntを使用）
+        function convertBase10toBase12(numStr, precision = 1000) {
+            let cleanStr = numStr.trim().replace(/ /g, '');
+            let parts = cleanStr.split('.');
+            let intStr = parts[0] || '0';
+            let fracStr = parts[1] || '';
+
+            let intVal = BigInt(intStr);
+            let intDigits = [];
+            if (intVal === 0n) {
+                intDigits.push('0');
+            } else {
+                while (intVal > 0n) {
+                    let rem = intVal % 12n;
+                    intDigits.push("0123456789AB"[Number(rem)]);
+                    intVal = intVal / 12n;
+                }
+                intDigits.reverse();
+            }
+
+            let fracDigits = [];
+            if (fracStr.length > 0) {
+                let denominator = 10n ** BigInt(fracStr.length);
+                let numerator = BigInt(fracStr);
+                for (let i = 0; i < precision; i++) {
+                    numerator *= 12n;
+                    let digit = numerator / denominator;
+                    fracDigits.push("0123456789AB"[Number(digit)]);
+                    numerator = numerator % denominator;
+                    if (numerator === 0n) break;
+                }
+            }
+            return intDigits.join('') + fracDigits.join('');
+        }
+
+        function onSourceChange() {
+            const source = document.getElementById("sourceSelect").value;
+            const input = document.getElementById("customInput");
+            if (source === "custom") {
+                input.style.display = "inline-block";
+                input.focus();
+                updateDisplay("[数値を入力してください]");
+            } else {
+                input.style.display = "none";
+                currentSequence = PRESETS[source];
+                updateDisplay(currentSequence);
+            }
+        }
+
+        function updateDisplay(seq) {
+            const container = document.getElementById("digitContainer");
+            container.innerHTML = "";
+            for (let i = 0; i < seq.length; i++) {
+                const span = document.createElement("span");
+                span.className = "digit";
+                span.innerText = seq[i];
+                container.appendChild(span);
+            }
+        }
+
+        function updateTempo(val) {
+            tempoBPM = val;
+            document.getElementById("tempoVal").innerText = val;
+        }
+
+        function playTone(pitch, duration) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+            const freq = 440 * Math.pow(2, (pitch - 69) / 12);
+
+            osc.frequency.setValueAtTime(freq, now);
+            osc.type = 'triangle';
+
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(0.2, now + 0.02);
+            gainNode.gain.setValueAtTime(0.2, now + duration - 0.05);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+            osc.start(now);
+            osc.stop(now + duration);
+        }
+
+        function scheduleNextNote() {
+            if (!isPlaying) return;
+
+            if (currentIndex >= currentSequence.length) {
+                stopPlaying();
+                return;
+            }
+
+            const spans = document.querySelectorAll(".digit");
+            spans.forEach((span, idx) => {
+                span.classList.remove("active");
+                if (idx < currentIndex) span.classList.add("played");
+            });
+            const activeSpan = spans[currentIndex];
+            if (activeSpan) {
+                activeSpan.classList.add("active");
+                activeSpan.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            const char = currentSequence[currentIndex];
+            const val = charToVal[char];
+
+            if (val !== undefined) {
+                const rootMidi = ROOT_NOTES[document.getElementById("rootSelect").value];
+                const scaleIntervals = SCALES[document.getElementById("scaleSelect").value];
+                const scaleLen = scaleIntervals.length;
+
+                const degree = val % scaleLen;
+                const octaveShift = Math.floor(val / scaleLen);
+                const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
+
+                let noteDurationSec;
+                if (document.getElementById("randomDuration").checked) {
+                    noteDurationSec = Math.random() * 1.15 + 0.05;
+                } else {
+                    noteDurationSec = 60 / tempoBPM;
+                }
+
+                playTone(pitch, noteDurationSec);
+                currentIndex++;
+                nextNoteTimeout = setTimeout(scheduleNextNote, noteDurationSec * 1000);
+            } else {
+                currentIndex++;
+                scheduleNextNote();
+            }
+        }
+
+        function startPlaying() {
+            if (isPlaying) return;
+
+            const source = document.getElementById("sourceSelect").value;
+            if (source === "custom") {
+                const inputVal = document.getElementById("customInput").value;
+                if (!inputVal) {
+                    alert("10進数（例: 3.1415）を入力してください。");
+                    return;
+                }
+                currentSequence = convertBase10toBase12(inputVal);
+                updateDisplay(currentSequence);
+            } else {
+                currentSequence = PRESETS[source];
+            }
+
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            isPlaying = true;
+            currentIndex = 0;
+            document.getElementById("playBtn").disabled = true;
+            scheduleNextNote();
+        }
+
+        function stopPlaying() {
+            isPlaying = false;
+            document.getElementById("playBtn").disabled = false;
+            if (nextNoteTimeout) clearTimeout(nextNoteTimeout);
+            const spans = document.querySelectorAll(".digit");
+            spans.forEach(span => span.classList.remove("active"));
+        }
+
+        function downloadMIDI() {
+            if (typeof MidiWriter === 'undefined') {
+                alert("MIDIライブラリがロードされていません。ネット接続を確認してください。");
+                return;
+            }
+
+            const source = document.getElementById("sourceSelect").value;
+            if (source === "custom") {
+                const inputVal = document.getElementById("customInput").value;
+                if (!inputVal) {
+                    alert("10進数を入力してください。");
+                    return;
+                }
+                currentSequence = convertBase10toBase12(inputVal);
+            } else {
+                currentSequence = PRESETS[source];
+            }
+
+            const track = new MidiWriter.Track();
+            track.setTempo(tempoBPM);
+
+            const isRandom = document.getElementById("randomDuration").checked;
+            const rootMidi = ROOT_NOTES[document.getElementById("rootSelect").value];
+            const scaleIntervals = SCALES[document.getElementById("scaleSelect").value];
+            const scaleLen = scaleIntervals.length;
+
+            for (let i = 0; i < currentSequence.length; i++) {
+                const char = currentSequence[i];
+                const val = charToVal[char];
+                if (val === undefined) continue;
+
+                const degree = val % scaleLen;
+                const octaveShift = Math.floor(val / scaleLen);
+                const pitch = rootMidi + scaleIntervals[degree] + (12 * octaveShift);
+
+                let durationSec;
+                if (isRandom) {
+                    durationSec = Math.random() * 1.15 + 0.05;
+                } else {
+                    durationSec = 60 / tempoBPM;
+                }
+
+                const ticksPerBeat = 128;
+                const ticks = durationSec * (ticksPerBeat * tempoBPM / 60);
+
+                const noteEvent = new MidiWriter.NoteEvent({
+                    pitch: [pitch],
+                    duration: 'T' + Math.round(ticks),
+                    velocity: 90
+                });
+                track.addEvent(noteEvent);
+            }
+
+            const write = new MidiWriter.Writer(track);
+            const dataUri = write.toDataUri();
+
+            const link = document.createElement('a');
+            link.href = dataUri;
+            link.download = `pi_base12_${source}.mid`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 初期表示
+        onSourceChange();
+    </script>
+</body>
+</html>
