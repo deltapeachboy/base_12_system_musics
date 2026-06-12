@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>12進法数理音楽ジェネレーター (音響完全修正版)</title>
+    <title>12進法数理音楽ジェネレーター (音階追加版)</title>
     <!-- 楽譜描画用のライブラリ (abcjs) -->
     <script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/dist/abcjs-basic-min.js"></script>
     <style>
@@ -166,6 +166,13 @@
                 <option value="minor">Natural Minor (マイナー)</option>
                 <option value="pentatonic">Pentatonic Major (ペンタトニック)</option>
                 <option value="japanese">Japanese (和風音階)</option>
+                <option value="dorian">Dorian (ドリアン)</option>
+                <option value="lydian">Lydian (リディアン)</option>
+                <option value="mixolydian">Mixolydian (ミクソリディアン)</option>
+                <option value="harmonicMinor">Harmonic Minor (和声短音階)</option>
+                <option value="wholeTone">Whole Tone (ホールトーン/全音音階)</option>
+                <option value="spanishGypsy">Spanish Gypsy (スパニッシュ・ジプシー)</option>
+                <option value="ryukyu">Ryukyu (琉球音階)</option>
                 <option value="chromatic">Chromatic (クロマチック/12音)</option>
             </select>
         </div>
@@ -220,11 +227,20 @@
 
         const charToVal = { '0':0, '1':1, '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, 'A':10, 'B':11 };
         const ROOT_NOTES = { 'C':60, 'C#':61, 'D':62, 'D#':63, 'E':64, 'F':65, 'F#':66, 'G':67, 'G#':68, 'A':69, 'A#':70, 'B':71 };
+
+        // 音階（スケール）データの拡張
         const SCALES = {
             major: [0, 2, 4, 5, 7, 9, 11],
             minor: [0, 2, 3, 5, 7, 8, 10],
             pentatonic: [0, 2, 4, 7, 9],
             japanese: [0, 1, 5, 7, 8],
+            dorian: [0, 2, 3, 5, 7, 9, 10],
+            lydian: [0, 2, 4, 6, 7, 9, 11],
+            mixolydian: [0, 2, 4, 5, 7, 9, 10],
+            harmonicMinor: [0, 2, 3, 5, 7, 8, 11],
+            wholeTone: [0, 2, 4, 6, 8, 10],
+            spanishGypsy: [0, 1, 4, 5, 7, 8, 10],
+            ryukyu: [0, 4, 5, 7, 11],
             chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
         };
 
@@ -355,7 +371,6 @@
             }
         }
 
-        // MIDIの番号から標準的な音名表記(C4, D#4など)を取得するヘルパー関数
         function getNoteName(midiNum) {
             const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
             const octave = Math.floor(midiNum / 12) - 1;
@@ -363,7 +378,6 @@
             return noteNames[noteIndex] + octave;
         }
 
-        // 12進数 ⇄ 音階の対応関係をテーブル表示としてリアルタイム更新する関数
         function updateMappingTable() {
             const rootKey = document.getElementById("rootSelect").value;
             const scaleName = document.getElementById("scaleSelect").value;
@@ -375,13 +389,11 @@
             const trDigits = document.getElementById("trDigits");
             const trNotes = document.getElementById("trNotes");
 
-            // 行の初期化（ヘッダーラベルの追加）
             trDigits.innerHTML = "<th style='background-color: #1a1a1a; color: #4fc3f7;'>12進数</th>";
             trNotes.innerHTML = "<th style='background-color: #1a1a1a; color: #e0e0e0;'>音名</th>";
 
             const chars = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B"];
 
-            // 0〜Bの12個の値を、現在選択されているスケール情報に基づいて計算しグリッドに挿入
             for (let i = 0; i < 12; i++) {
                 const char = chars[i];
                 const val = i;
@@ -428,9 +440,7 @@
             }
         }
 
-        // 楽譜レンダリング (128音同期)
         function updateScore() {
-            // スケール対応表も同時に自動更新
             updateMappingTable();
 
             if (!currentSequence || currentSequence.length === 0) {
@@ -491,7 +501,6 @@
             document.getElementById("tempoVal").innerText = val;
         }
 
-        // --- 音響生成エンジン (絶対エラーを起こさない指数減衰方式) ---
         function playTone(pitch, duration) {
             if (duration <= 0) duration = 0.1;
 
@@ -514,10 +523,9 @@
                 osc.frequency.setValueAtTime(freq, now);
                 osc.type = 'triangle';
 
-                // W3C規格に準拠した安全で滑らかな指数減衰の音量コントロール (Safari、Chrome、iOS対応)
                 gainNode.gain.setValueAtTime(0, now);
-                gainNode.gain.setTargetAtTime(0.2, now, 0.01); // 開始10msで立ち上がり
-                gainNode.gain.setTargetAtTime(0.001, now + (duration * 0.7), 0.05); // 音の70%経過時点で自動フェードアウト
+                gainNode.gain.setTargetAtTime(0.2, now, 0.01);
+                gainNode.gain.setTargetAtTime(0.001, now + (duration * 0.7), 0.05);
 
                 osc.start(now);
                 osc.stop(now + duration);
@@ -600,9 +608,8 @@
             spans.forEach(span => span.classList.remove("active"));
         }
 
-        // --- 完全に100%自立したMIDI生成エンジン ---
         function createMidiFile(notes) {
-            const ticksPerBeat = 128; // MIDI分解能 (1拍 = 128 ticks)
+            const ticksPerBeat = 128;
 
             function toVLQ(num) {
                 let buffer = [];
@@ -665,7 +672,6 @@
             return new Uint8Array([...mthd, ...mtrkHeader, ...mtrkSize, ...trackEvents]);
         }
 
-        // --- 自立エンジンを使用したダウンロード処理 ---
         function downloadMIDI() {
             if (generatedNoteData.length === 0) {
                 updateScore();
